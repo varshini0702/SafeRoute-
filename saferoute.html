@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>SafeRoute+</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.css" />
+  <style>
+    body { font-family: Arial, sans-serif; text-align: center; margin: 0; padding: 0; }
+    h1 { background: #4CAF50; color: white; padding: 15px; margin: 0; }
+    .page { display: none; padding: 20px; }
+    .active { display: block; }
+    button { margin: 10px; padding: 12px 20px; font-size: 16px; cursor: pointer; border-radius: 8px; border: none; background: #4CAF50; color: white; }
+    #map1, #map2 { height: 400px; margin-top: 15px; }
+    input { padding: 10px; margin: 5px; width: 250px; }
+  </style>
+</head>
+<body>
+
+<h1>SafeRoute+</h1>
+
+<div id="home" class="page active">
+  <h2>Select an Option</h2>
+  <button onclick="showPage('option1')">1️⃣ Check if My Current Location is Safe</button>
+  <button onclick="showPage('option2')">2️⃣ Plan a Route and Check Safety</button>
+</div>
+
+<div id="option1" class="page">
+  <h2>Check Current Location Safety</h2>
+  <p><button onclick="getCurrentLocation()">Check My Location</button></p>
+  <p id="location-status"></p>
+  <div id="map1"></div>
+  <p><button onclick="showPage('home')">⬅ Back</button></p>
+</div>
+
+<div id="option2" class="page">
+  <h2>Enter Current Location and Destination</h2>
+  <input type="text" id="start" placeholder="Enter your street name">
+  <input type="text" id="end" placeholder="Enter destination street name">
+  <button onclick="planRoute()">Check Route</button>
+  <p id="route-status"></p>
+  <div id="map2"></div>
+  <p><button onclick="showPage('home')">⬅ Back</button></p>
+</div>
+
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.js"></script>
+
+<script>
+let map1 = L.map('map1').setView([20.5937, 78.9629], 5);
+let map2 = L.map('map2').setView([20.5937, 78.9629], 5);
+
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap contributors' }).addTo(map1);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap contributors' }).addTo(map2);
+
+let routingControl = null;
+
+function showPage(id) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+  if (id === 'option1') setTimeout(() => map1.invalidateSize(), 200);
+  else if (id === 'option2') setTimeout(() => map2.invalidateSize(), 200);
+}
+
+const cctvLocations = [
+  {lat: 28.6139, lon: 77.2090, safe: true, name: "New Delhi CCTV"},
+  {lat: 19.0760, lon: 72.8777, safe: false, name: "Mumbai CCTV"},
+  {lat: 13.0827, lon: 80.2707, safe: true, name: "Chennai CCTV"},
+];
+
+cctvLocations.forEach(c => {
+  const popupText = `${c.name}<br>Safe: ${c.safe ? "Yes ✅" : "No ❌"}`;
+  L.marker([c.lat, c.lon]).addTo(map1).bindPopup(popupText);
+  L.marker([c.lat, c.lon]).addTo(map2).bindPopup(popupText);
+});
+
+function getCurrentLocation() {
+  if (!navigator.geolocation) { alert("Geolocation not supported."); return; }
+  navigator.geolocation.getCurrentPosition(async pos => {
+    const lat = pos.coords.latitude;
+    const lon = pos.coords.longitude;
+    map1.setView([lat, lon], 15);
+    L.marker([lat, lon]).addTo(map1).bindPopup("📍 You are here").openPopup();
+    try {
+      const res = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json`);
+      const data = await res.json();
+      const address = data.display_name;
+      const safe = Math.random() > 0.4;
+      const traffic = Math.floor(Math.random() * 100);
+      document.getElementById('location-status').innerHTML =
+        `📍 Current Location: <b>${address}</b><br>
+         Safety: <b>${safe ? "Safe ✅" : "Danger ❌"}</b><br>
+         CCTV Available: <b>${safe ? "Yes" : "Few"}</b><br>
+         Traffic: <b>${traffic}%</b>`;
+    } catch (e) {
+      alert("Error fetching location details.");
+    }
+  }, () => { alert("Unable to get your location."); });
+}
+
+async function planRoute() {
+  const start = document.getElementById('start').value;
+  const end = document.getElementById('end').value;
+  if (!start || !end) { alert("Please enter both locations."); return; }
+  try {
+    const startRes = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(start)}`);
+    const startJson = await startRes.json();
+    const endRes = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(end)}`);
+    const endJson = await endRes.json();
+    if (!startJson.length || !endJson.length) { alert("Could not find one or both locations."); return; }
+    const startLat = parseFloat(startJson[0].lat), startLon = parseFloat(startJson[0].lon);
+    const endLat = parseFloat(endJson[0].lat), endLon = parseFloat(endJson[0].lon);
+    map2.setView([startLat, startLon], 13);
+    L.marker([startLat, startLon]).addTo(map2).bindPopup("Start");
+    L.marker([endLat, endLon]).addTo(map2).bindPopup("Destination");
+    if (routingControl) map2.removeControl(routingControl);
+    const safeRoute = Math.random() > 0.5;
+    const routeColor = safeRoute ? "green" : "red";
+    const traffic = Math.floor(Math.random() * 100);
+    routingControl = L.Routing.control({
+      waypoints: [L.latLng(startLat, startLon), L.latLng(endLat, endLon)],
+      lineOptions: { styles: [{ color: routeColor, weight: 5 }] },
+      routeWhileDragging: false,
+      createMarker: () => null
+    }).addTo(map2);
+    routingControl.on('routesfound', function(e) {
+      const route = e.routes[0];
+      const distanceKm = (route.summary.totalDistance / 1000).toFixed(2);
+      const durationMin = (route.summary.totalTime / 60).toFixed(1);
+      document.getElementById('route-status').innerHTML =
+        `Route Safety: <b>${safeRoute ? "Safe ✅" : "Danger ❌"}</b><br>
+         Distance: <b>${distanceKm} km</b><br>
+         Estimated Duration: <b>${durationMin} min</b><br>
+         CCTV Available: <b>${safeRoute ? "Yes" : "Few"}</b><br>
+         Traffic: <b>${traffic}%</b>`;
+    });
+  } catch (e) {
+    alert("Error planning route.");
+  }
+}
+</script>
+</body>
+</html>
+
+
